@@ -1,0 +1,18 @@
+{
+    "files.associations": {
+        "*.rmd": "markdown",
+        "stdio.h": "c",
+        "string.h": "c",
+        "fs.h": "c",
+        "stat.h": "c",
+        "param.h": "c",
+        "types.h": "c",
+        "strings.h": "c",
+        "riscv.h": "c",
+        "*.tcc": "c",
+        "fstream": "c",
+        "memlayout.h": "c",
+        "proc.h": "c",
+        "spinlock.h": "c"
+    }
+}
