@@ -39,8 +39,8 @@ struct logheader {
 
 struct log {
   struct spinlock lock;
-  int start;
-  int size;
+  int start;       // block index of log's header
+  int size;        // number of blocks in log
   int outstanding; // how many FS sys calls are executing.
   int committing;  // in commit(), please wait.
   int dev;

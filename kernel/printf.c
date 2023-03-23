@@ -25,7 +25,7 @@ static struct {
 
 static char digits[] = "0123456789abcdef";
 
-static void printint(int xx, int base, int sign) {
+static void printkint(int xx, int base, int sign) {
   char buf[16];
   int i;
   uint x;
@@ -47,7 +47,7 @@ static void printint(int xx, int base, int sign) {
     consputc(buf[i]);
 }
 
-static void printptr(uint64 x) {
+static void printkptr(uint64 x) {
   int i;
   consputc('0');
   consputc('x');
@@ -56,7 +56,7 @@ static void printptr(uint64 x) {
 }
 
 // Print to the console. only understands %d, %x, %p, %s.
-void printf(char *fmt, ...) {
+void printfk(char *fmt, ...) {
   va_list ap;
   int i, c, locking;
   char *s;
@@ -79,13 +79,13 @@ void printf(char *fmt, ...) {
       break;
     switch (c) {
     case 'd':
-      printint(va_arg(ap, int), 10, 1);
+      printkint(va_arg(ap, int), 10, 1);
       break;
     case 'x':
-      printint(va_arg(ap, int), 16, 1);
+      printkint(va_arg(ap, int), 16, 1);
       break;
     case 'p':
-      printptr(va_arg(ap, uint64));
+      printkptr(va_arg(ap, uint64));
       break;
     case 's':
       if ((s = va_arg(ap, char *)) == 0)
@@ -111,15 +111,15 @@ void printf(char *fmt, ...) {
 
 void panic(char *s) {
   pr.locking = 0;
-  printf("panic: ");
-  printf(s);
-  printf("\n");
+  printfk("panic: ");
+  printfk(s);
+  printfk("\n");
   panicked = 1; // freeze uart output from other CPUs
   for (;;)
     ;
 }
 
-void printfinit(void) {
+void printfkinit(void) {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }

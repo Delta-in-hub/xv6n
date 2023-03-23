@@ -76,7 +76,7 @@ static uint balloc(uint dev) {
     }
     brelse(bp);
   }
-  printf("balloc: out of blocks\n");
+  printfk("balloc: out of blocks\n");
   return 0;
 }
 
@@ -201,7 +201,7 @@ struct inode *ialloc(uint dev, short type) {
     }
     brelse(bp);
   }
-  printf("ialloc: no inodes\n");
+  printfk("ialloc: no inodes\n");
   return 0;
 }
 
