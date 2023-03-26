@@ -72,7 +72,7 @@ static void install_trans(int recovering) {
     memmove(dbuf->data, lbuf->data, BSIZE); // copy block to dst
     bwrite(dbuf);                           // write dst to disk
     if (recovering == 0)
-      bunpin(dbuf);
+      bunpin(dbuf); // pined in log_write()
     brelse(lbuf);
     brelse(dbuf);
   }

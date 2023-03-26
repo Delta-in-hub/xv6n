@@ -86,12 +86,16 @@ void printfk(char *, ...);
 void panic(char *) __attribute__((noreturn));
 void printfkinit(void);
 
+#ifndef NODEBUG
 #define assertk(x, msg)                                                        \
   {                                                                            \
     if (!(x)) {                                                                \
       panic(msg);                                                              \
     }                                                                          \
   }
+#else
+#define assertk(x, msg) (x)
+#endif
 
 // proc.c
 int cpuid(void);

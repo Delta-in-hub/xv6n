@@ -71,3 +71,5 @@ user/usys.S
 
 .cache/
 compile_commands.json
+struct_padding.h
+call_graph_incoming.svg
