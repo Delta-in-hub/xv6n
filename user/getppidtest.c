@@ -14,6 +14,8 @@ int main(int argc, char *argv[]) {
     pid = getpid();
     ppid = getppid();
     printf("pid: %d, ppid: %d\n", pid, ppid);
+    if (ppid >= pid)
+      printf("ERROR: ppid >= pid\n");
     exit(0);
   }
   wait(0);
@@ -21,6 +23,9 @@ int main(int argc, char *argv[]) {
   pid = getpid();
   ppid = getppid();
   printf("pid: %d, ppid: %d\n", pid, ppid);
+  // pid: 3, ppid: 2
 
+  if (pid > ppid)
+    printf("getppidtest PASS\n");
   exit(0);
 }
