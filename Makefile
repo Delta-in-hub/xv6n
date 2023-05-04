@@ -172,3 +172,15 @@ qemu-gdb: $K/kernel .gdbinit fs.img
 	@echo "*** Now run 'gdb' in another window." 1>&2
 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
 
+print-gdbport:
+	@echo $(GDBPORT)
+
+
+pre-test:
+UPROGS += $U/_hello\
+
+test: pre-test $K/kernel fs.img
+	@/usr/bin/env python3 grade.py test
+
+handin: pre-test $K/kernel fs.img
+	@/usr/bin/env python3 grade.py handin
