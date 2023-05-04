@@ -133,6 +133,7 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
+	$U/_hello\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
@@ -176,11 +177,9 @@ print-gdbport:
 	@echo $(GDBPORT)
 
 
-pre-test:
-UPROGS += $U/_hello\
 
-test: pre-test $K/kernel fs.img
+test: $K/kernel fs.img
 	@/usr/bin/env python3 grade.py test
 
-handin: pre-test $K/kernel fs.img
+handin: $K/kernel fs.img
 	@/usr/bin/env python3 grade.py handin
