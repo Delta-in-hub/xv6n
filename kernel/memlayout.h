@@ -49,6 +49,10 @@
 #define KERNBASE 0x80000000L
 #define PHYSTOP (KERNBASE + 128 * 1024 * 1024)
 
+// For buddy allocator
+#define RAMNPAGES 32768   // (128*1024*1024/4096), OS memory pages
+#define RAMNPAGES_LOG2 15 // log2(RAMNPAGES)
+
 // map the trampoline page to the highest address,
 // in both user and kernel space.
 #define TRAMPOLINE (MAXVA - PGSIZE)

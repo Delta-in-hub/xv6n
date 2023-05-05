@@ -8,38 +8,105 @@
 #include "spinlock.h"
 #include "riscv.h"
 #include "defs.h"
+#include "kmath.h"
 #include "list.h"
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
-struct free_chunk {
-  void *start;         // start address of free chunk
-  size_t size_in_page; // size of free chunk in page
-  list_entry entry;    // list entry
-};
+static void *buddy_alloc(size_t npages);
+static void buddy_free(void *pa, size_t npages);
 
-static void free_chunk_init(struct free_chunk *chunk, void *start,
-                            size_t size_in_page);
-static void free_chunk_free(list_entry *chunk_list, void *start, size_t npages);
-static void *free_chunk_alloc(list_entry *chunk_list, size_t npages);
+/*
+buddy tree be like (number is idx) :
+                          1
+                2                       3
+          4           5           6           7
+      8       9   10      11  12      13  14      15
+*/
+
+struct buddyblock {
+  void *pa;       // physical address of this block
+  size_t idx;     // index of this block in the buddy tree
+  list_entry ent; // list entry of this block
+};
 
 struct {
   struct spinlock lock;
-  list_entry free_chunk_list;
+  list_entry list[RAMNPAGES_LOG2 + 1];
+  /*
+  list[0] : buddyblock list head with size (2^0 = 1) pages
+  list[1] : buddyblock list head with size (2^1 = 2) pages
+  list[2] : buddyblock list head with size (2^2 = 4) pages
+  ...
+  list[MAXNLOG2] : buddyblock list head with size (2^MAXNLOG2) pages
+
+  We call i of list[i] as level of this list.
+  */
+
+  uint MAXNLOG2; // 2^MAXNLOG2 is the max block size in pages
+                 // MAXNLOG2 <= RAMNPAGES_LOG2, because buddy tree structure
+                 // needs memory too. A part of memory is used for buddy tree
+                 // itself.
+
 } kmem;
+
+#define LCHIND(x) ((x)*2)
+#define RCHIND(x) ((x)*2 + 1)
+#define PARENT(x) ((x) / 2)
+#define BUDDY(x) ((x) % 2 == 0 ? (x) + 1 : (x)-1)
+
+// Convert block index to number of pages
+static inline uint idx2npages(uint idx) {
+  // idx : page number size of this block
+  // 1 : kmem.MAXNLOG2
+  // 2,3 : kmem.MAXNLOG2/2
+  // 4,5,6,7 : kmem.MAXNLOG2/4
+  uint n = rounddown2i(idx);
+  return (1 << (kmem.MAXNLOG2)) / n;
+}
+
+// Convert (address, number of pages) to block index
+static inline uint npages2idx(void *pa, uint npages) {
+
+  uint n = log2i(npages);
+
+  uint startidx = 1 << (kmem.MAXNLOG2 - n); // the very first block's index of
+                                            // this page size
+
+  uint64 memstart = PGROUNDUP((uint64)end);
+  uint64 offset = (uint64)pa - memstart;
+  uint offsetidx = offset / (PGSIZE * npages); // distance from the very first
+                                               // block
+
+  return startidx + offsetidx;
+}
 
 void kinit() {
   initlock(&kmem.lock, "kmem");
 
   uint64 memstart = PGROUNDUP((uint64)end);
   uint64 memend = PGROUNDDOWN((uint64)PHYSTOP);
-  size_t totalpages = (memend - memstart) / PGSIZE;
+  uint64 totalpages = (memend - memstart) / PGSIZE;
+  totalpages = rounddown2i(totalpages); // buddy system only support 2^n pages
 
-  struct free_chunk *chunk = (struct free_chunk *)memstart;
-  free_chunk_init(chunk, (void *)memstart, totalpages);
+  uint64 maxnlog2 = log2i(totalpages);
+  kmem.MAXNLOG2 = maxnlog2;
+  if (maxnlog2 > RAMNPAGES_LOG2)
+    panic("kinit: too much memory");
 
-  pushBack(&kmem.free_chunk_list, &chunk->entry);
+  for (int i = 0; i <= maxnlog2; i++) {
+    list_entry_init(&kmem.list[i]);
+  }
+
+  struct buddyblock *block = (struct buddyblock *)memstart;
+  block->pa = (void *)memstart;
+  block->idx = 1; // idx start from 1
+  list_entry_init(&block->ent);
+
+  // In init, we have only one block with size 2^maxnlog2, which is the whole
+  // memory available. So we insert it to the list of 2^maxnlog2
+  pushFront(&kmem.list[maxnlog2], &block->ent);
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -67,157 +134,91 @@ void *kalloc(void) {
   return r;
 }
 
-// Physical Memory Manager, unit is page
-//! First fit Now
-//! You need to modify code to the best fit algorithm
-
-/**
- * @brief Initialize a free chunk
- * @param chunk the chunk to be initialized
- * @param start start address of the chunk
- * @param size_in_page size of the chunk in page
- */
-static void free_chunk_init(struct free_chunk *chunk, void *start,
-                            size_t size_in_page) {
-  chunk->start = start;
-  chunk->size_in_page = size_in_page;
-  list_entry_init(&chunk->entry);
-}
-
-/**
- * @brief allocate npages pages of physical memory from chunk_list ,
- * must be called with lock held
- * @param chunk_list the list of free chunks
- * @param npages number of pages to allocate
- * @return void* , the start address of allocated memory, NULL if failed
- */
-static void *free_chunk_alloc(list_entry *chunk_list, size_t npages) {
-
-  traverse(p, chunk_list) {
-    struct free_chunk *current_chunk = listEntry(p, struct free_chunk, entry);
-
-    // First fit now
-    if (current_chunk->size_in_page >=
-        npages) { // There is enough space in this chunk
-
-      char *ret = current_chunk->start; // start address of allocated memory
-
-      size_t remain_pages = current_chunk->size_in_page - npages;
-
-      // If there is remain space in this chunk, we need to update the chunk
-      struct free_chunk *next_chunk =
-          (struct free_chunk *)(current_chunk->start + npages * PGSIZE);
-
-      if (remain_pages == 0) { // If there is no remain space, just delete this
-                               // chunk from the free chunk list
-        delEntry(p);
-      } else {
-        // (chunk->start) not always equal to (chunk)
-        // If (chunk->start) less than (chunk), such as:
-        //  | -page0- | -page1- | -chunk struct- | -page3- |
-        //! ^chunk->start            ^chunk
-        // and then allocate one page, we just need to update the chunk->start
-        // and chunk->size_in_page Else, such as:
-        //  | -page0- | -chunk struct- | -page2- | -page3- |
-        //! ^chunk->start   ^chunk
-        // then allocate two pages, we need to init a new chunk struct on the
-        // page2, and push it back to the free chunk list
-
-        if (current_chunk < next_chunk) {
-          free_chunk_init(next_chunk, next_chunk, remain_pages);
-          pushBack(&next_chunk->entry, p);
-          delEntry(p);
-        } else {
-          current_chunk->start = next_chunk;
-          current_chunk->size_in_page = remain_pages;
-        }
-      }
-      return ret;
-    }
-  }
-
-  return NULL;
-}
-
-/**
- * @brief try to merge two free chunks, must be called with lock held,
- * merge chunk1 to chunk0
- * @param chunk0
- * @param chunk1
- * @return 1 if merged, 0 if not
- */
-static int try_to_merge_two_free_chunk(struct free_chunk *chunk0,
-                                       struct free_chunk *chunk1) {
-
-  if (chunk0->start + chunk0->size_in_page * PGSIZE == chunk1->start) {
-    chunk0->size_in_page += chunk1->size_in_page;
-    return 1;
-  } else if (chunk1->start + chunk1->size_in_page * PGSIZE == chunk0->start) {
-    chunk0->start = chunk1->start;
-    chunk0->size_in_page += chunk1->size_in_page;
-    return 1;
-  }
-
-  return 0;
-}
-
-/**
- * @brief free npages pages of physical memory, give it back to chunk_list,
- * must be called with lock held
- * @param chunk_list the list of free chunks
- * @param start address of the memory to be freed
- * @param npages number of pages to free
- */
-static void free_chunk_free(list_entry *chunk_list, void *start,
-                            size_t npages) {
-  struct free_chunk *chunk = (struct free_chunk *)start;
-
-  free_chunk_init(chunk, start, npages);
-
-  int insert_flag = 0;
-
-  traverse(p, chunk_list) {
-    struct free_chunk *pchunk = listEntry(p, struct free_chunk, entry);
-
-    if (!insert_flag) {
-      // try to merge reback chunk to the current chunk
-      insert_flag = try_to_merge_two_free_chunk(pchunk, chunk);
-    }
-
-    if (!isLast(p, chunk_list)) {
-      // p is not the last chunk,thus we can try to merge current chunk to the
-      // next chunk
-      struct free_chunk *nchunk = listEntry(p->succ, struct free_chunk, entry);
-
-      // merge to the next chunk and delete the current chunk
-      int res = try_to_merge_two_free_chunk(nchunk, pchunk);
-
-      if (res) // if merged, delete the current chunk
-        delEntry(p);
-    }
-  }
-
-  if (!insert_flag) // if reback chunk is not merged with any chunk, insert it
-                    // to the free chunk list
-    pushFront(&chunk->entry, chunk_list);
-}
-
-// Allocate n pages of physical memory.
 void *kallocn(size_t npages) {
   if (npages == 0)
     return NULL;
   void *r = NULL;
   acquire(&kmem.lock);
-  r = free_chunk_alloc(&kmem.free_chunk_list, npages);
+  r = buddy_alloc(npages);
   release(&kmem.lock);
   return r;
 }
 
-// Free n pages of physical memory pointed at pa.
 void kfreen(void *pa, size_t npages) {
   if (!pa)
     return;
   acquire(&kmem.lock);
-  free_chunk_free(&kmem.free_chunk_list, pa, npages);
+  buddy_free(pa, npages);
   release(&kmem.lock);
+}
+
+// Buddy Memory Management
+// https://en.wikipedia.org/wiki/Buddy_memory_allocation
+
+// split entp(bigger buddy block) into two small blocks,
+// and insert to the (level - 1) buddy block list
+static void buddy_split(list_entry *entp, int level) {
+  struct buddyblock *block = listEntry(entp, struct buddyblock, ent);
+
+
+  if (level == 0)
+    panic("split_to_nextlevel: level == 0");
+
+
+}
+
+// merge two blocks into a big block,
+// and insert to the (level + 1) list
+static list_entry *buddy_merge(list_entry *b1, list_entry *b2) {
+  struct buddyblock *block1 = listEntry(b1, struct buddyblock, ent);
+  struct buddyblock *block2 = listEntry(b2, struct buddyblock, ent);
+  if (block1->idx != BUDDY(block2->idx))
+    panic("buddy_merge: block1->idx != BUDDY(block2->idx)");
+
+
+
+
+
+}
+
+// allocate a block with npages, must be called with lock held
+static void *buddy_alloc(size_t npages) {
+  npages = roundup2i(npages);
+  uint targetn = log2i(npages);
+  if (targetn > kmem.MAXNLOG2)
+    return NULL;
+  if (!isEmpty(&kmem.list[targetn])) {
+    list_entry *entp = popFront(&kmem.list[targetn]);
+    if (!entp)
+      panic("buddy_alloc: popFront failed return NULL");
+    struct buddyblock *block = listEntry(entp, struct buddyblock, ent);
+    return block->pa;
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+  return NULL;
+}
+
+static void buddy_free(void *pa, size_t npages) {
+  if (!pa)
+    return;
+  npages = roundup2i(npages);
+  uint idx = npages2idx(pa, npages);
+  if (idx == 0)
+    panic("buddy_free: idx == 0");
+
+
+
+
 }

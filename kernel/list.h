@@ -15,8 +15,10 @@
 typedef unsigned long size_t;
 #endif
 
+#ifndef offsetof
 // struct type中成员name的地址偏移量
 #define offsetof(type, name) ((size_t) & ((type *)0)->name)
+#endif
 
 /**
  * container_of - cast a member of a structure out to the containing structure
@@ -74,15 +76,18 @@ typedef struct list_entry {
   struct list_entry *prev, *succ;
 } list_entry;
 
-static void list_entry_init(list_entry *p) {
+static inline void list_entry_init(list_entry *p) {
   p->prev = p;
   p->succ = p;
 }
 
 // Whether entry is the last entry in list head
-static int isLast(list_entry *entry, list_entry *head) {
+static inline int isLast(list_entry *entry, list_entry *head) {
   return entry->succ == head && head->prev == entry;
 }
+
+// Whether a list is empty
+static inline int isEmpty(list_entry *head) { return isLast(head, head); }
 
 /*
  * 内核链表不管理内存,插入节点时插入对象由使用者开辟空间,删除节点时也不会释放空间
@@ -91,7 +96,7 @@ static int isLast(list_entry *entry, list_entry *head) {
 
 // data will be the first element in the head's list,
 // insert after the head
-static void pushFront(list_entry *data, list_entry *head) {
+static inline void pushFront(list_entry *data, list_entry *head) {
   // 将data插在head与head->succ之间
   data->prev = head;
   data->succ = head->succ;
@@ -101,7 +106,7 @@ static void pushFront(list_entry *data, list_entry *head) {
 
 // data will be the last element in the head's list,
 // insert before the head
-static void pushBack(list_entry *data, list_entry *head) {
+static inline void pushBack(list_entry *data, list_entry *head) {
   pushFront(data, head->prev);
 }
 
@@ -109,11 +114,19 @@ static void pushBack(list_entry *data, list_entry *head) {
  * deletes entry from list.
  * @entry: the element to delete from the list.
  */
-static void delEntry(list_entry *entry) {
+static inline void delEntry(list_entry *entry) {
   entry->prev->succ = entry->succ;
   entry->succ->prev = entry->prev;
   entry->prev = NULL;
   entry->succ = NULL;
+}
+
+static inline list_entry *popFront(list_entry *head) {
+  if (isEmpty(head))
+    return NULL;
+  list_entry *data = head->succ;
+  delEntry(data);
+  return data;
 }
 
 #endif
