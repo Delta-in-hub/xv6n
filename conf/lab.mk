@@ -1,2 +1,2 @@
-LAB = lab3-1-pthread
+LAB = lab3-2-sem
 TOKEN = 20190000-xxxxxxxxxxxxxxxx
