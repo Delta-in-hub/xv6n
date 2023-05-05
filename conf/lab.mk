@@ -1,2 +1,2 @@
-LAB = lab2-3-getppid
+LAB = lab2-4-getsched
 TOKEN = 20190000-xxxxxxxxxxxxxxxx
