@@ -1,2 +1,2 @@
-LAB = lab5-1-exception
+LAB = lab5-2-minigdb
 TOKEN = 20190000-xxxxxxxxxxxxxxxx

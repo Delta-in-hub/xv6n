@@ -11,14 +11,19 @@
 #define N 3
 
 int main(void) {
-  char *c = 0;
+
+  char arr[32];
+
+  char *c = arr;
   for (; c < (char *)N; c++) {
     char p = *c;
     *c = p * p;
   }
 
-  c = (char *)-1;
-  for (; c > (char *)(-1 - N); c--) {
+  asm volatile("ebreak");
+
+  c = (char *)arr + 31;
+  for (; c > (char *)(arr + 1); c--) {
     char p = *c;
     *c = p * p;
   }
