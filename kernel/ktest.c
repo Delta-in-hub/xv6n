@@ -12,9 +12,9 @@ int ktest() {
   flag &= kalloc_test();
 
   if (flag) {
-    printf("ktest: cpu%d pass all tests\n", cpuid());
+    printfk("ktest: cpu%d pass all tests\n", cpuid());
   } else {
-    printf("ktest: cpu%d not pass all tests\n", cpuid());
+    printfk("ktest: cpu%d not pass all tests\n", cpuid());
     panic("ktest: failed\n");
   }
 
