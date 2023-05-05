@@ -1,2 +1,2 @@
-LAB = lab6-1-bestfit
+LAB = lab6-3-umalloc
 TOKEN = 20190000-xxxxxxxxxxxxxxxxx

@@ -180,9 +180,13 @@ print-gdbport:
 	@echo $(GDBPORT)
 
 
-test: $K/kernel fs.img
+umalloctest:
+	@gcc -o _umalloc_test umalloc_test.c umalloc.c
+
+
+test: umalloctest
 	@/usr/bin/env python3 grade.py test
 
 
-handin: $K/kernel fs.img
+handin: umalloctest
 	@/usr/bin/env python3 grade.py handin
