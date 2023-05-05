@@ -133,7 +133,7 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
-	$U/_getschedtimetest\
+
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
@@ -176,10 +176,11 @@ qemu-gdb: $K/kernel .gdbinit fs.img
 print-gdbport:
 	@echo $(GDBPORT)
 
+pthreadtest:
+	@gcc -o _pthreadtest pthread.c -lpthread
 
-
-test: $K/kernel fs.img
+test: pthreadtest
 	@/usr/bin/env python3 grade.py test
 
-handin: $K/kernel fs.img
+handin: pthreadtest
 	@/usr/bin/env python3 grade.py handin
