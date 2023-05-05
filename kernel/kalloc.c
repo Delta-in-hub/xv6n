@@ -8,166 +8,215 @@
 #include "spinlock.h"
 #include "riscv.h"
 #include "defs.h"
-
-void freerange(void *pa_start, void *pa_end);
+#include "list.h"
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
-struct run {
-  struct run *next;
+struct free_chunk {
+  void *start;         // start address of free chunk
+  size_t size_in_page; // size of free chunk in page
+  list_entry entry;    // list entry
 };
 
-struct free_list {
-  struct spinlock lock;
-  struct run *freelist;
-} kmem, *per_hart_free_list;
+static void free_chunk_init(struct free_chunk *chunk, void *start,
+                            size_t size_in_page);
+static void free_chunk_free(list_entry *chunk_list, void *start, size_t npages);
+static void *free_chunk_alloc(list_entry *chunk_list, size_t npages);
 
-void *per_hart_alloc_init();
+struct {
+  struct spinlock lock;
+  list_entry free_chunk_list;
+} kmem;
 
 void kinit() {
-  void *free_memory_start = per_hart_alloc_init();
   initlock(&kmem.lock, "kmem");
-  freerange(free_memory_start, (void *)PHYSTOP);
-}
 
-void freerange(void *pa_start, void *pa_end) {
-  char *p;
-  p = (char *)PGROUNDUP((uint64)pa_start);
-  for (; p + PGSIZE <= (char *)pa_end; p += PGSIZE)
-    kfree(p);
-}
+  uint64 memstart = PGROUNDUP((uint64)end);
+  uint64 memend = PGROUNDDOWN((uint64)PHYSTOP);
+  size_t totalpages = (memend - memstart) / PGSIZE;
 
-int pkfree(void *pa);
+  struct free_chunk *chunk = (struct free_chunk *)memstart;
+  free_chunk_init(chunk, (void *)memstart, totalpages);
+
+  pushBack(&kmem.free_chunk_list, &chunk->entry);
+}
 
 // Free the page of physical memory pointed at by pa,
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
 void kfree(void *pa) {
-  struct run *r;
-
-  // physics address must be rounded to 4k, and  `end`<= pa <= PHYSTOP
   if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
-  if (pkfree(pa))
-    return;
-  r = (struct run *)pa;
-
-  acquire(&kmem.lock);
-  // insert to the front of the free-list
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  kfreen(pa, 1);
 }
-
-void *pkalloc();
 
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
 void *kalloc(void) {
-  void *ret = pkalloc();
-  if (ret) {
-    memset((char *)ret, 5, PGSIZE); // fill with junk
-    return ret;
-  }
-  struct run *r;
-
-  acquire(&kmem.lock);
-  // get the front one of the free-list
-  r = kmem.freelist;
-  if (r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+  void *r = kallocn(1);
 
   if (r)
     memset((char *)r, 5, PGSIZE); // fill with junk
-  return (void *)r;
+  return r;
 }
 
-// Modified by Delta [START]
-#define ROUND_UP(N, S) ((((N) + (S)-1) / (S)) * (S))
-#define ROUND_DOWN(N, S) ((uint64)(N / S) * S)
-
-#define PER_HART_ALLOC_SIZE (1 * 1024 * 1024) // per hart has 1MB space
-
-#define assert(x)                                                              \
-  {                                                                            \
-    if (!(x))                                                                  \
-      panic("assert failed");                                                  \
-  }
+// Physical Memory Manager, unit is page
+//! First fit Now
 
 /**
- * @brief per hart(cpu) alloc 1MB space for itself.
- *
- * @return the start address of remain memory
+ * @brief Initialize a free chunk
+ * @param chunk the chunk to be initialized
+ * @param start start address of the chunk
+ * @param size_in_page size of the chunk in page
  */
-void *per_hart_alloc_init() {
-  per_hart_free_list = (struct free_list *)end;
-  for (int i = 0; i < NCPU; i++) {
-    initlock(&per_hart_free_list[i].lock, "kmem-per-hart-freelist");
-    per_hart_free_list[i].freelist = (void *)0;
-  }
+static void free_chunk_init(struct free_chunk *chunk, void *start,
+                            size_t size_in_page) {
+  chunk->start = start;
+  chunk->size_in_page = size_in_page;
+  list_entry_init(&chunk->entry);
+}
 
-  uint64 _s = (uint64)per_hart_free_list + NCPU * sizeof(*per_hart_free_list);
-  _s = PGROUNDUP(_s);
+/**
+ * @brief allocate npages pages of physical memory from chunk_list(First fit) ,
+ * must be called with lock held
+ * @param chunk_list the list of free chunks
+ * @param npages number of pages to allocate
+ * @return void* , the start address of allocated memory, NULL if failed
+ */
+static void *free_chunk_alloc(list_entry *chunk_list, size_t npages) {
 
-  for (int i = 0; i < NCPU; i++) {
-    for (int j = 0; j < PER_HART_ALLOC_SIZE / PGSIZE; j++) {
-      struct run *r = (struct run *)_s;
-      r->next = per_hart_free_list[i].freelist;
-      per_hart_free_list[i].freelist = r;
+  traverse(p, chunk_list) {
+    struct free_chunk *current_chunk = listEntry(p, struct free_chunk, entry);
 
-      _s += PGSIZE;
+    // First fit
+    if (current_chunk->size_in_page >=
+        npages) { // There is enough space in this chunk
+
+      char *ret = current_chunk->start; // start address of allocated memory
+
+      size_t remain_pages = current_chunk->size_in_page - npages;
+
+      // If there is remain space in this chunk, we need to update the chunk
+      struct free_chunk *next_chunk =
+          (struct free_chunk *)(current_chunk->start + npages * PGSIZE);
+
+      if (remain_pages == 0) { // If there is no remain space, just delete this
+                               // chunk from the free chunk list
+        delEntry(p);
+      } else {
+        // (chunk->start) not always equal to (chunk)
+        // If (chunk->start) less than (chunk), such as:
+        //  | -page0- | -page1- | -chunk struct- | -page3- |
+        //! ^chunk->start            ^chunk
+        // and then allocate one page, we just need to update the chunk->start
+        // and chunk->size_in_page Else, such as:
+        //  | -page0- | -chunk struct- | -page2- | -page3- |
+        //! ^chunk->start   ^chunk
+        // then allocate two pages, we need to init a new chunk struct on the
+        // page2, and push it back to the free chunk list
+
+        if (current_chunk < next_chunk) {
+          free_chunk_init(next_chunk, next_chunk, remain_pages);
+          pushBack(&next_chunk->entry, p);
+          delEntry(p);
+        } else {
+          current_chunk->start = next_chunk;
+          current_chunk->size_in_page = remain_pages;
+        }
+      }
+      return ret;
     }
-    assert(_s <= PHYSTOP);
   }
-  return (void *)_s;
+
+  return NULL;
 }
 
 /**
- * @brief alloca 4KB space on hart's self-memroy. No need to acquire lock.
- *
- * @return NULL for failed
+ * @brief try to merge two free chunks, must be called with lock held,
+ * merge chunk1 to chunk0
+ * @param chunk0
+ * @param chunk1
+ * @return 1 if merged, 0 if not
  */
-void *pkalloc() {
-  int id = cpuid();
-  // The requirement: the hartid must be continuous and started from 0.
-  // This is Ok for qemu-risc
-  struct free_list *free_list = &per_hart_free_list[id];
-  struct run *ret;
-  acquire(&free_list->lock);
-  ret = free_list->freelist;
-  if (ret)
-    free_list->freelist = ret->next;
-  release(&free_list->lock);
-  return (void *)ret;
+static int try_to_merge_two_free_chunk(struct free_chunk *chunk0,
+                                       struct free_chunk *chunk1) {
+
+  if (chunk0->start + chunk0->size_in_page * PGSIZE == chunk1->start) {
+    chunk0->size_in_page += chunk1->size_in_page;
+    return 1;
+  } else if (chunk1->start + chunk1->size_in_page * PGSIZE == chunk0->start) {
+    chunk0->start = chunk1->start;
+    chunk0->size_in_page += chunk1->size_in_page;
+    return 1;
+  }
+
+  return 0;
 }
 
 /**
- * @brief check if pa belongs to a hart's self-memory, if true give it back to
- * that hart's free-list,else do nothing
- *
- * @return 1 for ture, 0 for else
+ * @brief free npages pages of physical memory, give it back to chunk_list,
+ * must be called with lock held
+ * @param chunk_list the list of free chunks
+ * @param start address of the memory to be freed
+ * @param npages number of pages to free
  */
-int pkfree(void *pa) {
-  uint64 _s = (uint64)per_hart_free_list + NCPU * sizeof(*per_hart_free_list);
-  _s = PGROUNDUP(_s);
+static void free_chunk_free(list_entry *chunk_list, void *start,
+                            size_t npages) {
+  struct free_chunk *chunk = (struct free_chunk *)start;
 
-  uint64 _id = ((uint64)pa - _s) / PER_HART_ALLOC_SIZE;
-  if (_id >= NCPU)
-    return 0;
-  struct free_list *fl = &per_hart_free_list[_id];
-  struct run *r = (struct run *)pa;
-  acquire(&fl->lock);
-  r->next = fl->freelist;
-  fl->freelist = r;
-  release(&fl->lock);
-  return 1;
+  free_chunk_init(chunk, start, npages);
+
+  int insert_flag = 0;
+
+  traverse(p, chunk_list) {
+    struct free_chunk *pchunk = listEntry(p, struct free_chunk, entry);
+
+    if (!insert_flag) {
+      // try to merge reback chunk to the current chunk
+      insert_flag = try_to_merge_two_free_chunk(pchunk, chunk);
+    }
+
+    if (!isLast(p, chunk_list)) {
+      // p is not the last chunk,thus we can try to merge current chunk to the
+      // next chunk
+      struct free_chunk *nchunk = listEntry(p->succ, struct free_chunk, entry);
+
+      // merge to the next chunk and delete the current chunk
+      int res = try_to_merge_two_free_chunk(nchunk, pchunk);
+
+      if (res) // if merged, delete the current chunk
+        delEntry(p);
+    }
+  }
+
+  if (!insert_flag) // if reback chunk is not merged with any chunk, insert it
+                    // to the free chunk list
+    pushFront(&chunk->entry, chunk_list);
 }
-// Modified by Delta [END]
+
+// Allocate n pages of physical memory.
+void *kallocn(size_t npages) {
+  if (npages == 0)
+    return NULL;
+  void *r = NULL;
+  acquire(&kmem.lock);
+  r = free_chunk_alloc(&kmem.free_chunk_list, npages);
+  release(&kmem.lock);
+  return r;
+}
+
+// Free n pages of physical memory pointed at pa.
+void kfreen(void *pa, size_t npages) {
+  if (!pa)
+    return;
+  acquire(&kmem.lock);
+  free_chunk_free(&kmem.free_chunk_list, pa, npages);
+  release(&kmem.lock);
+}

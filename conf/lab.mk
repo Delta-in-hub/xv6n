@@ -1,2 +1,2 @@
-LAB = lab5-1-exception
+LAB = lab6-1-bestfit
 TOKEN = 20190000-xxxxxxxxxxxxxxxx

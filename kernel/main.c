@@ -43,5 +43,6 @@ int main() {
     plicinithart(); // ask PLIC for device interrupts
   }
 
+  ktest();
   scheduler();
 }
