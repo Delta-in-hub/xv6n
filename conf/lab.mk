@@ -1,2 +1,2 @@
-LAB = lab3-2-sem
+LAB = lab3-3-sem_impl
 TOKEN = 20190000-xxxxxxxxxxxxxxxx

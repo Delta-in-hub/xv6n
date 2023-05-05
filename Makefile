@@ -176,11 +176,11 @@ qemu-gdb: $K/kernel .gdbinit fs.img
 print-gdbport:
 	@echo $(GDBPORT)
 
-semttest:
-	@gcc -o _semttest semt.c -lpthread
+semimpltest:
+	@gcc -o _sem_impl_test sem_impl.c sem_impl_test.c -lpthread
 
-test: semttest
+test: semimpltest
 	@/usr/bin/env python3 grade.py test
 
-handin: semttest
+handin: semimpltest
 	@/usr/bin/env python3 grade.py handin
