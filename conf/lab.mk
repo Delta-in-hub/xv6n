@@ -1,2 +1,2 @@
-LAB = lab5-1-exception
+LAB = lab8-1-symlink
 TOKEN = 20190000-xxxxxxxxxxxxxxxx
