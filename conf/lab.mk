@@ -1,2 +1,2 @@
-LAB = lab3-3-sem_impl
+LAB = lab4-1-sched
 TOKEN = 20190000-xxxxxxxxxxxxxxxx

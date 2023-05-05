@@ -133,6 +133,7 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
+	$U/_schedtest\
 
 
 fs.img: mkfs/mkfs README $(UPROGS)
@@ -176,11 +177,10 @@ qemu-gdb: $K/kernel .gdbinit fs.img
 print-gdbport:
 	@echo $(GDBPORT)
 
-semimpltest:
-	@gcc -o _sem_impl_test sem_impl.c sem_impl_test.c -lpthread
 
-test: semimpltest
+test: $K/kernel fs.img
 	@/usr/bin/env python3 grade.py test
 
-handin: semimpltest
+
+handin: $K/kernel fs.img
 	@/usr/bin/env python3 grade.py handin
