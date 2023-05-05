@@ -186,9 +186,9 @@ int devintr() {
     // software interrupt from a machine-mode timer interrupt,
     // forwarded by timervec in kernelvec.S.
 
-    if (cpuid() == 0) {
-      clockintr();
-    }
+    // if (cpuid() == 0) {
+    clockintr();
+    // }
 
     // acknowledge the software interrupt by clearing
     // the SSIP bit in sip.

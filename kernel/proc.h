@@ -111,4 +111,7 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  int last_tick;     // last tick time of scheduling , for mlfq
+  uint totoal_ticks; // total ticks of running, for mlfq
 };

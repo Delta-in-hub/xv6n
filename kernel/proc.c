@@ -10,6 +10,104 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
+// 多级反馈队列 (OSTEP)
+// https://zhuanlan.zhihu.com/p/367636084
+
+// MLFQ，共有共有几级队列
+#define NPROCQUEUE 3
+
+// MLFQ 的 参数 S, 经过一段时间 S ，就将系统中所有工作重新加入最高优先级队列。
+#define S_MLFQ 32
+
+// 每一级队列的锁
+struct spinlock procqueue_lock[NPROCQUEUE];
+
+// 共有NPROCQUEUE级队列，每个队列最多NPROC个进程
+struct proc *procqueue[NPROCQUEUE][NPROC];
+
+/*
+队列优先级越高，其时间片越短
+priority : time slice ticks
+2:2
+1:4
+0:8
+tick = 2^(3 - pri)
+*/
+static int TTICKS[] = {8, 4, 2};
+
+/**
+ * @brief 将进程加入到多级反馈队列中
+ * @param p 进程 pcb
+ * @param level 队列级别
+ * @return 0 for success, -1 for fail
+ */
+int add_to_mlfq(struct proc *p, int level);
+
+/**
+ * @brief
+ * 从多级反馈队列中获取一个可运行的进程（并从队列里去掉），同时持有该进程的锁
+ * @param level 队列级别
+ * @return struct proc* 可运行的进程，0 表示没有可运行的进程
+ */
+struct proc *get_runnable_from_mlfq(int level);
+
+/**
+ * @brief 将所有进程重新加入最高优先级队列
+ * @return 0 for success, -1 for fail
+ */
+int requeue_mlfq();
+
+/**
+ * @brief mlfq, 进程调度 scheduler
+ */
+int scheduler_mlfq();
+
+int add_to_mlfq(struct proc *p, int level) {}
+
+struct proc *get_runnable_from_mlfq(int level) {}
+
+int requeue_mlfq() {}
+
+int scheduler_mlfq() {
+  if (ticks && ticks % S_MLFQ == 0) {
+    requeue_mlfq();
+  }
+  struct cpu *c = mycpu();
+  for (int pri = NPROCQUEUE - 1; pri >= 0; pri--) {
+    struct proc *p = get_runnable_from_mlfq(pri);
+    if (p == 0)
+      continue;
+    c->proc = p;
+    p->state = RUNNING;
+
+    swtch(&c->context, &p->context);
+
+    // process yield
+
+    switch (p->state) {
+    case RUNNABLE:
+    case SLEEPING: // SLEPPING will finnaly become RUNNABLE at some time, Done
+                   // by Intrpt handler
+
+      if (add_to_mlfq(p, next_level) != 0) {
+        panic("add_to_mlfq failed"); // better to dynamically grow the queue
+                                     // rather than fixed length
+      }
+      break;
+    case ZOMBIE: // from exit() syscall
+      break;
+    default:
+      panic("mlfq_scheduler: unexpected state");
+    }
+
+    c->proc = 0;
+    release(&p->lock);
+    goto _end;
+  }
+_end:
+  return 0;
+}
+
 struct proc *initproc;
 
 int nextpid = 1;
@@ -131,7 +229,9 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  if (add_to_mlfq(p, NPROCQUEUE - 1) != 0) {
+    panic("proc queue is full or something wrong");
+  }
   return p;
 }
 
@@ -153,6 +253,8 @@ static void freeproc(struct proc *p) {
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->last_tick = 0;
+  p->totoal_ticks = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -342,6 +444,9 @@ void exit(int status) {
 
   acquire(&p->lock);
 
+  if (p->state != RUNNING)
+    panic("exit: not running process");
+
   p->xstate = status;
   p->state = ZOMBIE;
 
@@ -407,7 +512,6 @@ int wait(uint64 addr) {
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
 void scheduler(void) {
-  struct proc *p;
   struct cpu *c = mycpu();
 
   c->proc = 0;
@@ -415,22 +519,7 @@ void scheduler(void) {
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
-    for (p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if (p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context); //(a0,a1)
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-      }
-      release(&p->lock);
-    }
+    scheduler_mlfq();
   }
 }
 
