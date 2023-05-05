@@ -69,6 +69,7 @@ void *kalloc(void) {
 
 // Physical Memory Manager, unit is page
 //! First fit Now
+//! You need to modify code to the best fit algorithm
 
 /**
  * @brief Initialize a free chunk
@@ -84,7 +85,7 @@ static void free_chunk_init(struct free_chunk *chunk, void *start,
 }
 
 /**
- * @brief allocate npages pages of physical memory from chunk_list(First fit) ,
+ * @brief allocate npages pages of physical memory from chunk_list ,
  * must be called with lock held
  * @param chunk_list the list of free chunks
  * @param npages number of pages to allocate
@@ -95,7 +96,7 @@ static void *free_chunk_alloc(list_entry *chunk_list, size_t npages) {
   traverse(p, chunk_list) {
     struct free_chunk *current_chunk = listEntry(p, struct free_chunk, entry);
 
-    // First fit
+    // First fit now
     if (current_chunk->size_in_page >=
         npages) { // There is enough space in this chunk
 

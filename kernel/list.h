@@ -57,7 +57,7 @@ typedef unsigned long size_t;
  * @head:	the head for your list.
  */
 #define traverseFromEntry(p, entry, head)                                      \
-  for (list_entry *p = entry->succ, *list_entry_temp = p->succ; p != (head);   \
+  for (list_entry *p = entry, *list_entry_temp = p->succ; p != (head);         \
        p = list_entry_temp, list_entry_temp = p->succ)
 
 /**
@@ -67,7 +67,7 @@ typedef unsigned long size_t;
  * @head:	the head for your list.
  */
 #define traverseReverseFromEntry(p, entry, head)                               \
-  for (list_entry *p = entry->prev, *list_entry_temp = p->prev; p != (head);   \
+  for (list_entry *p = entry, *list_entry_temp = p->prev; p != (head);         \
        p = list_entry_temp, list_entry_temp = p->prev)
 
 typedef struct list_entry {

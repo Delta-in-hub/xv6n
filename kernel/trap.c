@@ -60,6 +60,9 @@ void usertrap(void) {
   } else {
     printfk("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printfk("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+    if (r_stval() <= 64) {
+      printfk("You are probably dereferencing a NULL pointer.\n");
+    }
     setkilled(p);
   }
 
