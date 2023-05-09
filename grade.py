@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 from subprocess import Popen
+import tarfile
 
 # test server address and port
 SERVER_ADDR = "127.0.0.1"
@@ -59,6 +60,8 @@ def my_handler(signum, frame):
         # rm {LAB}.py
         safeRemove("gradelib.py")
         safeRemove(f"{LAB}.py")
+        # {LAB}-{TOKEN}.tar.gz
+        safeRemove(f"{LAB}-{TOKEN}.tar.gz")
         exit(0)
 
 
@@ -102,6 +105,16 @@ def genCurlPostHandinCmd(toekn: str, lab: str, content: str):
     jc = f"{{ \"token\": \"{toekn}\", \"lab\": \"{lab}\", \"content\": \"{content}\" }}"
 
     return ("curl", "-s", "-L", "-X", "POST", f"http://{SERVER_ADDR}:{SERVER_PORT}/handin", "-H", "accept: application/json", "-H", "Content-Type: application/json", "-d", jc)
+
+# curl -X 'POST' \
+#   'http://127.0.0.1:8000/uploadcode/20194755/lab2-1-hello' \
+#   -H 'accept: application/json' \
+#   -H 'Content-Type: multipart/form-data' \
+#   -F 'code=@test.tar.gz;type=application/gzip'
+
+
+def genCurlPostCodeCmd(token: str, lab: str, path: str):
+    return ('curl', '-s', '-L', '-X', 'POST', f'http://{SERVER_ADDR}:{SERVER_PORT}/uploadcode/{token}/{lab}', '-H', 'accept: application/json', '-H', 'Content-Type: multipart/form-data', '-F', f'code=@{path};type=application/gzip')
 
 
 def getGradelibPy():
@@ -198,6 +211,38 @@ def runtest():
     return content
 
 
+def traverse():
+    filelist = []
+    for root, dirs, files in os.walk("."):
+        # print(root)
+        path = root.split(os.sep)
+        # skip folder
+        dirname = path[1] if len(path) > 1 else ''
+        if dirname in ['__pycache__', '.cache', '.vscode', 'docs', '.git']:
+            continue
+        # print((len(path) - 1) * '---', os.path.basename(root))
+        for file in files:
+            suffix = ['.sym', '.d', '.asm', '.o', '.img', '.tar.gz']
+            if file.startswith('.') or file.startswith('_'):
+                continue
+            flag = False
+            for s in suffix:
+                if file.endswith(s):
+                    flag = True
+                    break
+            if flag:
+                continue
+            # print(len(path) * '---', file)
+            filelist.append(os.path.join(root, file))
+    return filelist
+
+
+def make_tarfile(output_filename, source_filelist):
+    with tarfile.open(output_filename, "w:gz") as tar:
+        for file in source_filelist:
+            tar.add(file)
+
+
 def handin():
     testres = runtest()
     if not testres or len(testres) == 0:
@@ -206,7 +251,8 @@ def handin():
     print()
 
     if "Score: 0/" in testres:
-        print(f"{bcolors.FAIL}==== Score 0, there is no need to handin ... ===={bcolors.ENDC}")
+        print(
+            f"{bcolors.FAIL}==== Score 0, there is no need to handin ... ===={bcolors.ENDC}")
         return
 
     print(f"{bcolors.OKBLUE}==== Handin for {LAB} ===={bcolors.ENDC}")
@@ -221,6 +267,23 @@ def handin():
                 break
             # print(line.decode('utf-8'), end='')
             content += line.decode('utf-8')
+        proc.wait()
+    except Exception as e:
+        print(e)
+        myExit()
+
+    try:
+        make_tarfile(f"{LAB}-{TOKEN}.tar.gz", traverse())
+        cmd = genCurlPostCodeCmd(TOKEN, LAB, f"{LAB}-{TOKEN}.tar.gz")
+        proc = Popen(cmd, stdout=subprocess.PIPE,
+                     stderr=subprocess.PIPE)
+        uploadcontent = ""
+        while proc.stdout.readable():
+            line = proc.stdout.readline()
+            if len(line) == 0:
+                break
+            print(line.decode('utf-8'))
+            uploadcontent += line.decode('utf-8')
         proc.wait()
     except Exception as e:
         print(e)
