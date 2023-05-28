@@ -73,3 +73,6 @@ user/usys.S
 compile_commands.json
 struct_padding.h
 call_graph_incoming.svg
+
+
+git-push.sh
